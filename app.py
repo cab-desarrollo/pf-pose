@@ -321,6 +321,11 @@ def process_uploaded_image(uploaded_file_bytes, pose_index):
         # CRÍTICO 2: Ejecutar la detección con el método .detect()
         detection_result = pose_detector.detect(mp_image)
 
+        # 🚨 [NUEVO] LÍNEA DE DEPURACIÓN CRÍTICA:
+        num_poses = len(detection_result.pose_landmarks) if detection_result.pose_landmarks else 0
+        print(f"DEBUG: Pose Index {pose_index} - Poses detectadas: {num_poses}")
+        # 🚨 [FIN DEPURACIÓN]
+
         # 3. Preparar Imagen para Dibujar (copia BGR)
         img_to_draw = img_bgr.copy()
 
