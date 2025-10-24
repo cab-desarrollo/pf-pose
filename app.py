@@ -61,11 +61,10 @@ def initialize_pose_landmarker(model_path: str):
     """Carga y cachea el detector de pose usando la ruta del activo local (.task) y fuerza el uso de CPU."""
 
     # 1. Configurar la delegación a CPU explícitamente
-    # Importante: BaseOptions se debe importar desde el módulo tasks (asumimos la corrección anterior).
+    # NOTA: Usamos Delegate.CPU para evitar el error de contexto EGL/OpenGL
     base_options = tasks.BaseOptions(
         model_asset_path=model_path,
-        # 🚨 Nuevo: Forzar el uso del delegado de CPU
-        delegate=tasks.BaseOptions.Delegate.CPU
+        delegate=tasks.BaseOptions.Delegate.CPU # ⬅️ ESTA ES LA CLAVE FINAL
     )
 
     # Configurar opciones del detector para modo IMAGE
