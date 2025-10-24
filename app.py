@@ -312,34 +312,39 @@ def process_uploaded_image(uploaded_file_bytes, pose_index):
 
         # 2. Convertir imagen a formato MP (solo RGB) y ejecutar detección (Tasks API)
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+
+        # 💡 CRÍTICO: Envuelve la imagen en un objeto mp.Image
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
 
-        # Ejecutar la detección con el nuevo objeto PoseLandmarker
+        # 💡 CRÍTICO: Ejecutar la detección con el método .detect()
         detection_result = pose_detector.detect(mp_image)
 
         # 3. Preparar Imagen para Dibujar (copia BGR)
         img_to_draw = img_bgr.copy()
 
         # 4. Procesar y Dibujar Landmarks
+        # La nueva API devuelve una lista de pose_landmarks (generalmente un solo elemento)
         if detection_result.pose_landmarks:
-            # Solo consideramos la primera pose (si num_poses=1)
-            pose_landmarks = detection_result.pose_landmarks[0]
 
-            # 4.1 Dibujar Esqueleto Básico (usando la API Legacy de Dibujo)
+            # Solo consideramos la primera pose (si num_poses=1)
+            pose_landmarks_list = detection_result.pose_landmarks[0]
+
+            # 4.1 Dibujar Esqueleto Básico (Usando el objeto de la nueva API en la función de dibujo Legacy)
             mp_drawing.draw_landmarks(
                 img_to_draw,
-                pose_landmarks, # Objeto de la nueva API
+                pose_landmarks_list, # Objeto de la nueva API: lista de NormalizedLandmarks
                 mp_pose.POSE_CONNECTIONS,
                 landmark_drawing_spec=mp_drawing.DrawingSpec(color=COLOR_PUNTO, thickness=-1, circle_radius=RADIO_PUNTO),
                 connection_drawing_spec=mp_drawing.DrawingSpec(color=COLOR_ESQUELETO, thickness=GROSOR_LINEA)
             )
 
             # 4.2 Obtener Coordenadas
-            # Adaptamos el formato de Tasks API (NormalizedLandmark) al diccionario de coordenadas (x, y) que necesita
             coords = {}
-            for i, landmark in enumerate(pose_landmarks):
-                # Usamos la enumeración de PoseLandmark para obtener el nombre del punto
+            # Iteramos sobre los landmarks del objeto de la Tasks API
+            for i, landmark in enumerate(pose_landmarks_list):
+                # Usamos la enumeración de PoseLandmark de la API Legacy para obtener el nombre del punto
                 lm_name = mp_pose.PoseLandmark(i).name
+                # El landmark de la Tasks API ya contiene x e y normalizados
                 coords[lm_name] = (int(landmark.x * img_w), int(landmark.y * img_h))
 
             # Calcular puntos virtuales (C7 y Centro Pélvico)
@@ -363,8 +368,12 @@ def process_uploaded_image(uploaded_file_bytes, pose_index):
             if coords.get("LEFT_SHOULDER") and not coords.get("RIGHT_SHOULDER"):
                  lado_visible = "LEFT"
 
-            # 6. Calcular Ángulos Específicos por Pose (Métricas del Informe)
 
+            # 6. Calcular Ángulos Específicos por Pose (Métricas del Informe)
+            # ➡️ Tu lógica de ángulos (calculate_angulo_3p, etc.) sigue siendo válida aquí
+            # porque se basa en el diccionario 'coords' que acabamos de construir.
+
+            # --- LÓGICA DE ÁNGULOS ORIGINAL REINSERTADA ---
             if pose_index == 1: # Vista Anterior Estática
                 analysis_angles["angulo_cabeza_h"] = calcular_angulo_linea_horizontal(coords["LEFT_EYE"], coords["RIGHT_EYE"]) # NUEVO
                 analysis_angles["angulo_hombros_h"] = calcular_angulo_linea_horizontal(coords["LEFT_SHOULDER"], coords["RIGHT_SHOULDER"])
@@ -440,6 +449,7 @@ def process_uploaded_image(uploaded_file_bytes, pose_index):
         return skeleton_image_bytes, analysis_text, analysis_angles
 
     except Exception as e:
+        # Aquí capturamos cualquier error en el flujo de detección y lo reportamos.
         return None, f"Error durante el procesamiento general: {e}", {}
 
 # --- Función auxiliar para obtener explicaciones ---
