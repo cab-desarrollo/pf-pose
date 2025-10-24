@@ -43,35 +43,32 @@ POSE_FILES_INFO = {
 
 # --- Configuración MediaPipe ---
 mp_pose = mp.solutions.pose
-mp_drawing = mp.solutions.drawing_utils # <- Asegúrate de mantener esta línea si existe
+mp_drawing = mp.solutions.drawing_utils
 
 # 1. Define la ruta al archivo TFLITE (Modelo que usa la API Legacy)
-MODEL_FILE_NAME = "pose_landmark_heavy.tflite" # ⬅️ DEBES AGREGAR ESTE ARCHIVO A /models/
-
+# MODEL_FILE_NAME = "pose_landmark_heavy.tflite" # ⬅️ ESTA LÍNEA ES INNECESARIA
 # 2. Ruta Absoluta Local
-LOCAL_MODEL_PATH = os.path.join(BASE_DIR, "models", MODEL_FILE_NAME)
+# LOCAL_MODEL_PATH = os.path.join(BASE_DIR, "models", MODEL_FILE_NAME) # ⬅️ ESTA LÍNEA ES INNECESARIA
 
-@st.cache_resource
-def get_local_model_path():
-    """Verifica y devuelve la ruta al modelo TFLITE local."""
-    if not os.path.exists(LOCAL_MODEL_PATH):
-        st.error(f"Error: Modelo '{MODEL_FILE_NAME}' no encontrado en: {LOCAL_MODEL_PATH}. ¡Agrégalo a la carpeta /models/!")
-        st.stop()
-    return LOCAL_MODEL_PATH
+# @st.cache_resource
+# def get_local_model_path(): # ⬅️ ESTA FUNCIÓN ES INNECESARIA
+#     """Verifica y devuelve la ruta al modelo TFLITE local."""
+#     if not os.path.exists(LOCAL_MODEL_PATH):
+#         st.error(f"Error: Modelo '{MODEL_FILE_NAME}' no encontrado en: {LOCAL_MODEL_PATH}. ¡Agrégalo a la carpeta /models/!")
+#         st.stop()
+#     return LOCAL_MODEL_PATH
 
 @st.cache_resource
 def initialize_pose_detector():
-    """Inicializa y cachea el detector de Pose de MediaPipe usando la ruta local."""
-
-    # 💡 La clave es usar model_asset_path con el modelo local.
+    """Inicializa y cachea el detector de Pose de MediaPipe."""
+    # Usamos model_complexity=2 para el modelo "heavy" por defecto de MediaPipe.
     return mp_pose.Pose(
         static_image_mode=True,
-        model_complexity=2,
+        model_complexity=2, # Usa el modelo "Heavy" interno (pose_landmark_heavy)
         enable_segmentation=False,
         min_detection_confidence=0.5,
-        model_asset_path=get_local_model_path() # ⬅️ ESTO SOLUCIONA EL PermissionError EN LA NUBE
+        # model_asset_path=get_local_model_path() # ⬅️ ELIMINAR ESTA LÍNEA
     )
-
 pose_detector = initialize_pose_detector()
 
 # --- Estilos de Dibujo ---
