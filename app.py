@@ -758,25 +758,6 @@ def render_pose_detail_view():
     # Intentar obtener el archivo subido del estado (si ya existe)
     uploaded_file = st.session_state.get(uploader_key)
 
-    if uploaded_file is not None:
-        # Verificar si el archivo es nuevo o no ha sido procesado
-        if f'last_uploaded_id_{pose_index}' not in st.session_state or st.session_state[f'last_uploaded_id_{pose_index}'] != uploaded_file.file_id:
-            with st.spinner("Analizando postura..."):
-                image_data = uploaded_file.getvalue()
-                skeleton_bytes, analysis_string, analysis_dict = process_uploaded_image(image_data, pose_index)
-
-                st.session_state[processed_bytes_key] = skeleton_bytes
-                st.session_state[analysis_text_key] = analysis_string
-                st.session_state[analysis_angles_key] = analysis_dict
-                st.session_state[f'last_uploaded_id_{pose_index}'] = uploaded_file.file_id
-
-                # Guardar datos para LSI
-                if pose_index == 7: st.session_state['profundidad_sls_izq'] = analysis_dict.get('flexion_rodilla_sls_izq')
-                elif pose_index == 8: st.session_state['profundidad_sls_der'] = analysis_dict.get('flexion_rodilla_sls_der')
-
-                st.session_state[analysis_msg_key] = "Análisis completado." if skeleton_bytes else analysis_string
-
-                st.rerun() # Disparar el re-renderizado
 
     # --- FIN DE LA LÓGICA CRÍTICA ---
 
@@ -917,9 +898,9 @@ def render_pose_detail_view():
         # Note: Ya lo definimos al principio, aquí solo lo renderizamos en su lugar final.
         st.file_uploader("Cargar imagen para analizar:", type=["jpg", "jpeg", "png"],
                          key=uploader_key,
-                         # ✅ Usar el callback
+                         # ✅ Usa el callback que definimos en la Sección 4
                          on_change=process_and_update_state,
-                         args=(uploader_key, pose_index), # Argumentos para el callback
+                         args=(uploader_key, pose_index),
                          label_visibility="collapsed")
 
 # -----------------------------------------------------------------------------

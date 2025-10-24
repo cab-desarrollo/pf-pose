@@ -4,4 +4,4 @@ Pillow
 mediapipe==0.10.8  # Usar una versión moderna compatible
 opencv-python==4.8.1.78
 numpy
-opencv-python-headless # Importante: usar la versión sin GUI
+#opencv-python-headless # Importante: usar la versión sin GUI
