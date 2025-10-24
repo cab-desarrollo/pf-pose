@@ -73,21 +73,14 @@ def get_pose_model_path():
 # which bypasses the automatic download logic.
 @st.cache_resource
 def initialize_pose_detector():
-    """Initializes the MediaPipe Pose detector and caches it."""
-    try:
-        model_asset_path = get_pose_model_path()
-    except FileNotFoundError as e:
-        # If the file path is broken, allow default initialization as a last resort
-        print(f"Warning: {e}. Attempting default MediaPipe initialization.")
-        model_asset_path = None
-
-    # Passing model_asset_path should prevent the internal download attempt (PermissionError)
+    """Inicializa y cachea el detector de Pose de MediaPipe."""
+    # El uso de la variable de entorno MEDIALIBS_DOWNLOAD_AUTO_CHECK = "false"
+    # previene el PermissionError, forzando al constructor a usar los archivos locales.
     return mp_pose.Pose(
         static_image_mode=True,
         model_complexity=2,
         enable_segmentation=False,
-        min_detection_confidence=0.5,
-        model_asset_path=model_asset_path  # CRITICAL: Pass the path
+        min_detection_confidence=0.5
     )
 
 pose_detector = initialize_pose_detector()
