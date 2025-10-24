@@ -3,5 +3,4 @@ pandas
 Pillow
 opencv-python
 mediapipe
-streamlit-option-menu
-streamlit_image_select
+numpy
