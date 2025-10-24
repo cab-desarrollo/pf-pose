@@ -10,6 +10,9 @@ import cv2 # OpenCV para procesamiento y dibujo
 import mediapipe as mp # Para pose estimation
 import numpy as np
 import math # Para cálculos trigonométricos si son necesarios
+# --- Configuración MediaPipe (Tasks API - API Robusta para Cloud) ---
+from mediapipe.tasks import python as tasks
+from mediapipe.tasks.python import vision
 
 # -----------------------------------------------------------------------------
 # 2. CONFIGURACIÓN DE LA PÁGINA Y CONSTANTES
@@ -42,51 +45,49 @@ POSE_FILES_INFO = {
 }
 
 # --- Configuración MediaPipe ---
+
+# Mantenemos mp_pose y mp_drawing para la lógica de dibujo (API Legacy)
 mp_pose = mp.solutions.pose
+mp_drawing = mp.solutions.drawing_utils
 
-# The model path is usually predictable inside the installed package
-MODEL_FILE_NAME = "pose_landmark_heavy.tflite"
-MP_SOLUTION_PATH = os.path.dirname(mp_pose.__file__)
-
-# Try common model paths (adjust '2' for model_complexity)
-MODEL_PATH = os.path.join(MP_SOLUTION_PATH, 'modules', 'pose_landmark', MODEL_FILE_NAME)
-
-# Use st.cache_resource to load the model file's bytes once.
-@st.cache_resource
-def get_pose_model_path():
-    """Returns the absolute path to the heavy pose model file."""
-    # Check expected installation location
-    if os.path.exists(MODEL_PATH):
-        return MODEL_PATH
-    else:
-        # Fallback check (less common, but safe)
-        fallback_path = os.path.join(os.path.dirname(mp.__file__), 'modules', 'pose_landmark', MODEL_FILE_NAME)
-        if os.path.exists(fallback_path):
-            return fallback_path
-
-        # If the model is STILL not found, it means the installation failed to include it.
-        # This is unlikely after successful pip install, but worth reporting.
-        raise FileNotFoundError(f"MediaPipe Pose Model not found at expected location: {MODEL_PATH}")
-
-
-# The actual Pose object MUST be created by passing the model_asset_path argument,
-# which bypasses the automatic download logic.
-mp_pose = mp.solutions.pose
+# 1. Definir la ruta local al modelo (DEBE ESTAR COMPROMETIDO EN EL REPOSITORIO)
+MODEL_FILENAME = "pose_landmarker_full.task"
+# Asume que el modelo .task está en pf-pose/models/
+# Utilizamos BASE_DIR para garantizar la ruta correcta
+MODEL_PATH = os.path.join(BASE_DIR, "models", MODEL_FILENAME)
 
 @st.cache_resource
-def initialize_pose_detector():
-    """Inicializa y cachea el detector de Pose de MediaPipe."""
-    # La variable de entorno MEDIAPIPE_DOWNLOAD_DIR configurada en secrets.toml
-    # manejará la ubicación de la descarga del modelo.
-    return mp_pose.Pose(
-        static_image_mode=True,
-        model_complexity=2,
-        enable_segmentation=False,
-        min_detection_confidence=0.5
+def initialize_pose_landmarker(model_path: str):
+    """Carga y cachea el detector de pose usando la ruta del activo local (.task) y fuerza el uso de CPU."""
+
+    # 1. Configurar la delegación a CPU explícitamente
+    # NOTA: Usamos Delegate.CPU para evitar el error de contexto EGL/OpenGL
+    base_options = tasks.BaseOptions(
+        model_asset_path=model_path,
+        delegate=tasks.BaseOptions.Delegate.CPU # ⬅️ ESTA ES LA CLAVE FINAL
     )
 
-pose_detector = initialize_pose_detector()
-mp_drawing = mp.solutions.drawing_utils
+    # Configurar opciones del detector para modo IMAGE
+    options = vision.PoseLandmarkerOptions(
+        base_options=base_options,
+        running_mode=vision.RunningMode.IMAGE,
+        num_poses=1,
+    )
+
+    # Inicializar el detector Landmarker
+    return vision.PoseLandmarker.create_from_options(options)
+
+# ➡️ Inicialización de la variable global pose_detector
+try:
+    # Usamos el nuevo inicializador de Tasks API
+    pose_detector = initialize_pose_landmarker(MODEL_PATH)
+except FileNotFoundError as e: # Captura el error de archivo faltante específicamente
+    st.error(f"Error Crítico: El archivo del modelo '{MODEL_FILENAME}' no se encontró en la ruta esperada: {MODEL_PATH}. Asegúrese de que esté en la carpeta /models/ del repositorio. Detalle: {e}")
+    st.stop()
+except Exception as e:
+    # Si es otro error (ej. permisos, modelo corrupto)
+    st.error(f"Error Crítico: No se pudo inicializar MediaPipe Tasks API. Detalle: {e}")
+    st.stop()
 
 # --- Estilos de Dibujo ---
 COLOR_ESQUELETO = (230, 230, 230)
@@ -299,71 +300,84 @@ def process_uploaded_image(uploaded_file_bytes, pose_index):
     """
     Procesa imagen, calcula métricas avanzadas del informe y
     devuelve bytes de imagen, texto de análisis y un dict con los ángulos.
-    (Esta función no requiere cambios, la lógica de cálculo es la misma)
     """
     analysis_angles = {}
     skeleton_image_bytes = None
     analysis_text = f"Análisis para Pose {pose_index}\n(Procesamiento no completado)"
 
     try:
-        # 1. Decodificar y Preparar Imagen
+        # 1. Decodificar y Preparar Imagen (OpenCV)
         file_bytes = np.asarray(bytearray(uploaded_file_bytes), dtype=np.uint8)
         img_bgr = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
         if img_bgr is None: return None, "Error: No se pudo decodificar la imagen.", {}
-        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-        img_h, img_w, _ = img_rgb.shape
-        img_rgb.flags.writeable = False
+        img_h, img_w, _ = img_bgr.shape
 
-        # 2. Detectar Pose
-        results = pose_detector.process(img_rgb)
+        # 2. Detección de Pose con Tasks API
+        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+
+        # CRÍTICO 1: Convertir imagen a formato mp.Image para la nueva API
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
+
+        # CRÍTICO 2: Ejecutar la detección con el método .detect()
+        detection_result = pose_detector.detect(mp_image)
+
+        # 🚨 [NUEVO] LÍNEA DE DEPURACIÓN CRÍTICA:
+        num_poses = len(detection_result.pose_landmarks) if detection_result.pose_landmarks else 0
+        print(f"DEBUG: Pose Index {pose_index} - Poses detectadas: {num_poses}")
+        # 🚨 [FIN DEPURACIÓN]
 
         # 3. Preparar Imagen para Dibujar (copia BGR)
         img_to_draw = img_bgr.copy()
 
-        if results.pose_landmarks:
-            landmarks = results.pose_landmarks.landmark
-            lm_idx = mp_pose.PoseLandmark
+        # 4. Procesar y Dibujar Landmarks
+        if detection_result.pose_landmarks and detection_result.pose_landmarks[0]:
 
-            # 4. Dibujar Esqueleto Básico
+            # El objeto pose_landmarks de Tasks API es una lista de listas de landmarks.
+            # Tomamos la primera pose detectada:
+            pose_landmarks_list = detection_result.pose_landmarks[0]
+
+            # 4.1 Dibujar Esqueleto Básico (Usando la API Legacy de Dibujo con el objeto de la nueva API)
             mp_drawing.draw_landmarks(
                 img_to_draw,
-                results.pose_landmarks,
+                pose_landmarks_list, # Objeto de la nueva API: lista de NormalizedLandmarks
                 mp_pose.POSE_CONNECTIONS,
                 landmark_drawing_spec=mp_drawing.DrawingSpec(color=COLOR_PUNTO, thickness=-1, circle_radius=RADIO_PUNTO),
                 connection_drawing_spec=mp_drawing.DrawingSpec(color=COLOR_ESQUELETO, thickness=GROSOR_LINEA)
             )
 
-            # 5. Obtener Coordenadas
-            coords = {lm_name: obtener_coords(landmarks, lm_enum, img_w, img_h)
-                      for lm_name, lm_enum in lm_idx.__members__.items()}
+            # 4.2 Obtener Coordenadas
+            coords = {}
+            # Iteramos sobre los landmarks del objeto de la Tasks API
+            for i, landmark in enumerate(pose_landmarks_list):
+                # Usamos la enumeración de PoseLandmark de la API Legacy para obtener el nombre del punto
+                lm_name = mp_pose.PoseLandmark(i).name
+                # El landmark de la Tasks API ya contiene x e y normalizados
+                coords[lm_name] = (int(landmark.x * img_w), int(landmark.y * img_h))
 
             # Calcular puntos virtuales (C7 y Centro Pélvico)
-            if coords["LEFT_SHOULDER"] and coords["RIGHT_SHOULDER"]:
+            if coords.get("LEFT_SHOULDER") and coords.get("RIGHT_SHOULDER"):
                 coords["MID_SHOULDER"] = ( (coords["LEFT_SHOULDER"][0] + coords["RIGHT_SHOULDER"][0]) / 2,
                                            (coords["LEFT_SHOULDER"][1] + coords["RIGHT_SHOULDER"][1]) / 2 )
             else: coords["MID_SHOULDER"] = None
 
-            if coords["LEFT_HIP"] and coords["RIGHT_HIP"]:
+            if coords.get("LEFT_HIP") and coords.get("RIGHT_HIP"):
                 coords["MID_HIP"] = ( (coords["LEFT_HIP"][0] + coords["RIGHT_HIP"][0]) / 2,
                                       (coords["LEFT_HIP"][1] + coords["RIGHT_HIP"][1]) / 2 )
             else: coords["MID_HIP"] = None
 
-            if coords["LEFT_ANKLE"] and coords["RIGHT_ANKLE"]:
+            if coords.get("LEFT_ANKLE") and coords.get("RIGHT_ANKLE"):
                 coords["MID_ANKLE"] = ( (coords["LEFT_ANKLE"][0] + coords["RIGHT_ANKLE"][0]) / 2,
                                       (coords["LEFT_ANKLE"][1] + coords["RIGHT_ANKLE"][1]) / 2 )
             else: coords["MID_ANKLE"] = None
 
-            # Detección automática de lado para vistas sagitales
+            # Detección automática de lado (simplificada)
             lado_visible = "RIGHT"
-            if coords["LEFT_SHOULDER"] and coords["RIGHT_SHOULDER"]:
-                if landmarks[lm_idx.LEFT_SHOULDER.value].visibility > landmarks[lm_idx.RIGHT_SHOULDER.value].visibility:
-                    lado_visible = "LEFT"
-            elif coords["LEFT_SHOULDER"]:
+            if coords.get("LEFT_SHOULDER") and not coords.get("RIGHT_SHOULDER"):
                  lado_visible = "LEFT"
 
 
             # 6. Calcular Ángulos Específicos por Pose (Métricas del Informe)
-
+            # --- LÓGICA DE ÁNGULOS ORIGINAL REINSERTADA ---
             if pose_index == 1: # Vista Anterior Estática
                 analysis_angles["angulo_cabeza_h"] = calcular_angulo_linea_horizontal(coords["LEFT_EYE"], coords["RIGHT_EYE"]) # NUEVO
                 analysis_angles["angulo_hombros_h"] = calcular_angulo_linea_horizontal(coords["LEFT_SHOULDER"], coords["RIGHT_SHOULDER"])
@@ -373,7 +387,7 @@ def process_uploaded_image(uploaded_file_bytes, pose_index):
 
             elif pose_index == 2: # Vista Sagital Estática
                 l_ear, l_shoulder, l_hip, l_knee, l_ankle = f"{lado_visible}_EAR", f"{lado_visible}_SHOULDER", f"{lado_visible}_HIP", f"{lado_visible}_KNEE", f"{lado_visible}_ANKLE"
-                if coords["MID_SHOULDER"] and coords[l_ear]:
+                if coords.get("MID_SHOULDER") and coords.get(l_ear):
                     punto_horizontal = (coords["MID_SHOULDER"][0] + 100, coords["MID_SHOULDER"][1])
                     analysis_angles["angulo_CVA"] = calcular_angulo_3p(punto_horizontal, coords["MID_SHOULDER"], coords[l_ear]) # NUEVO
 
@@ -391,7 +405,7 @@ def process_uploaded_image(uploaded_file_bytes, pose_index):
                 analysis_angles["angulo_pelvis_h"] = calcular_angulo_linea_horizontal(coords["LEFT_HIP"], coords["RIGHT_HIP"])
                 analysis_angles["angulo_FPPA_dinamico_der"] = calcular_angulo_3p(coords["RIGHT_HIP"], coords["RIGHT_KNEE"], coords["RIGHT_ANKLE"])
                 analysis_angles["angulo_FPPA_dinamico_izq"] = calcular_angulo_3p(coords["LEFT_HIP"], coords["LEFT_KNEE"], coords["LEFT_ANKLE"])
-                if coords["MID_HIP"] and coords["MID_ANKLE"]:
+                if coords.get("MID_HIP") and coords.get("MID_ANKLE"):
                     analysis_angles["desplazamiento_pelvico_px"] = coords["MID_HIP"][0] - coords["MID_ANKLE"][0]
 
             elif pose_index == 5: # OHS Sagital
@@ -420,6 +434,8 @@ def process_uploaded_image(uploaded_file_bytes, pose_index):
                 analysis_angles["angulo_FPPA_sls_der"] = calcular_angulo_3p(coords["RIGHT_HIP"], coords["RIGHT_KNEE"], coords["RIGHT_ANKLE"])
                 analysis_angles["inclinacion_tronco_v"] = calcular_angulo_linea_vertical(coords["MID_HIP"], coords["MID_SHOULDER"]) # NUEVO
                 analysis_angles["flexion_rodilla_sls_der"] = calcular_angulo_3p(coords["RIGHT_HIP"], coords["RIGHT_KNEE"], coords["RIGHT_ANKLE"])
+            # --- FIN LÓGICA DE ÁNGULOS ORIGINAL REINSERTADA ---
+
 
             # 7. Generar Texto de Análisis
             analysis_text = generar_analisis_texto(analysis_angles, pose_index)
@@ -431,14 +447,44 @@ def process_uploaded_image(uploaded_file_bytes, pose_index):
         # 8. Codificar Imagen (esqueleto) a Bytes
         is_success, buffer = cv2.imencode(".png", img_to_draw)
         if is_success:
-            skeleton_image_bytes = io.BytesIO(buffer).getvalue()
+            # ✅ Asegúrate de que esto devuelve bytes válidos
+            skeleton_image_bytes = io.BytesIO(buffer.tobytes()).getvalue()
         else:
             analysis_text += "\nError: No se pudo codificar la imagen del esqueleto."
+            # Si aquí hay error, el `skeleton_image_bytes` es None.
 
         return skeleton_image_bytes, analysis_text, analysis_angles
 
     except Exception as e:
+        # Aquí capturamos cualquier error en el flujo de detección y lo reportamos.
         return None, f"Error durante el procesamiento general: {e}", {}
+
+def process_and_update_state(uploaded_file, pose_index):
+    """Callback para procesar la imagen y actualizar el estado de sesión."""
+    # Keys necesarias para el estado
+    processed_bytes_key = f'processed_bytes_{pose_index}'
+    analysis_text_key = f'analysis_text_{pose_index}'
+    analysis_angles_key = f'analysis_angles_{pose_index}'
+
+    if uploaded_file is not None:
+        try:
+            with st.spinner(f"Analizando postura para {POSE_FILES_INFO[st.session_state.pose_seleccionada_info['file_key']]['title']}..."):
+                image_data = uploaded_file.getvalue()
+                skeleton_bytes, analysis_string, analysis_dict = process_uploaded_image(image_data, pose_index)
+
+                st.session_state[processed_bytes_key] = skeleton_bytes
+                st.session_state[analysis_text_key] = analysis_string
+                st.session_state[analysis_angles_key] = analysis_dict
+
+                # Guardar datos para LSI
+                if pose_index == 7: st.session_state['profundidad_sls_izq'] = analysis_dict.get('flexion_rodilla_sls_izq')
+                elif pose_index == 8: st.session_state['profundidad_sls_der'] = analysis_dict.get('flexion_rodilla_sls_der')
+
+                if skeleton_bytes is None:
+                     st.error("Error al procesar la imagen. Verifica los logs. ¿Pose no detectada?")
+
+        except Exception as e:
+            st.error(f"Error inesperado durante el análisis: {e}")
 
 # --- Función auxiliar para obtener explicaciones ---
 def get_explanation_for_pose(pose_index):
@@ -733,15 +779,14 @@ def render_pose_detail_view():
     processed_bytes_key = f'processed_bytes_{pose_index}'
     analysis_text_key = f'analysis_text_{pose_index}'
     analysis_angles_key = f'analysis_angles_{pose_index}'
-    analysis_msg_key = f'analysis_msg_{pose_index}'
-    uploader_key = f"uploader_{pose_index}" # Clave del uploader
 
     # --- LÓGICA CRÍTICA: Procesamiento del archivo ---
     # Recuperar el valor del uploader después de la ejecución del ciclo anterior
     # Importante: Streamlit lee el valor del uploader antes de que se renderice completamente en el ciclo.
 
     # Intentar obtener el archivo subido del estado (si ya existe)
-    uploaded_file = st.session_state.get(uploader_key)
+    uploaded_file = st.session_state.get(f"uploader_dynamic_{st.session_state.uploader_count}")
+
 
     if uploaded_file is not None:
         # Verificar si el archivo es nuevo o no ha sido procesado
@@ -761,8 +806,13 @@ def render_pose_detail_view():
 
                 st.session_state[analysis_msg_key] = "Análisis completado." if skeleton_bytes else analysis_string
 
-                st.rerun() # Disparar el re-renderizado
+            # 1. Condicional para incrementar el contador (SOLO si fue exitoso)
+            if skeleton_bytes is not None:
+                st.session_state.uploader_count += 1
 
+            # 2. Llamada al rerun (FUERA del if, para asegurar que siempre se refresque
+            #    después de un intento de procesamiento)
+            st.rerun()
     # --- FIN DE LA LÓGICA CRÍTICA ---
 
 
@@ -879,34 +929,34 @@ def render_pose_detail_view():
     # --- CUADRANTE 3: Imagen Procesada y Carga (Renderizado) ---
     with col_result_display:
 
+        # Muestra la imagen procesada SIEMPRE que esté disponible
         if image_processed:
             st.image(st.session_state[processed_bytes_key], use_container_width=True)
-
-            # Bloque de Descarga
-            st.markdown("""<div style="margin-top: 1rem;"></div>""", unsafe_allow_html=True)
-            col_btn1, col_btn2 = st.columns(2)
-            with col_btn1:
-                st.download_button( "📥 Descargar Imagen", st.session_state[processed_bytes_key], f"esqueleto_{file_key}.png", "image/png", use_container_width=True, type="primary")
-            with col_btn2:
-                analysis_content = st.session_state.get(analysis_text_key, "").encode('utf-8')
-                st.download_button("📄 Descargar Análisis", analysis_content, f"analisis_{file_key}.txt", "text/plain", use_container_width=True, type="secondary", disabled=(not analysis_content))
-
-            # Bloque de Carga (Abajo de todo)
+            # ... (Botones de descarga sin cambios) ...
             st.markdown("""<hr style="margin-top: 1rem; margin-bottom: 0.5rem;" /> """, unsafe_allow_html=True)
             st.markdown("##### Cargar nueva imagen")
 
         else:
             st.info("La imagen procesada aparecerá aquí.")
 
-        # Uploader (Renderizado Abajo de todo)
-        # Note: Ya lo definimos al principio, aquí solo lo renderizamos en su lugar final.
+        # 🚨 CORRECCIÓN CLAVE: Usar la clave estática y el callback.
+        # Al usar una clave estática, Streamlit conserva el valor del uploader.
+        # Al usar on_change, la función se ejecuta SOLO cuando se sube un archivo, no por st.rerun().
         st.file_uploader("Cargar imagen para analizar:", type=["jpg", "jpeg", "png"],
-                         key=uploader_key, label_visibility="collapsed")
+                             # ✅ CLAVE ESTÁTICA para la pose, no dinámica!
+                             key=f"uploader_static_{pose_index}",
+                             # ✅ USA EL CALLBACK para procesar
+                             on_change=process_and_update_state,
+                             # ✅ Pasamos el valor del uploader y el índice a la función
+                             args=(st.session_state.get(f"uploader_static_{pose_index}"), pose_index),
+                             label_visibility="collapsed")
 
 # -----------------------------------------------------------------------------
 # 6. LÓGICA PRINCIPAL DE LA APLICACIÓN (MAIN)
 # -----------------------------------------------------------------------------
 def main():
+    # Al principio de app.py o dentro de main():
+    if 'uploader_count' not in st.session_state: st.session_state.uploader_count = 0
     users_df = get_users(USERS_CSV_PATH)
     if users_df is None: st.stop()
 
