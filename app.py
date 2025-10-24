@@ -82,9 +82,12 @@ def initialize_pose_landmarker(model_path: str):
 try:
     # Usamos el nuevo inicializador de Tasks API
     pose_detector = initialize_pose_landmarker(MODEL_PATH)
+except FileNotFoundError as e: # Captura el error de archivo faltante específicamente
+    st.error(f"Error Crítico: El archivo del modelo '{MODEL_FILENAME}' no se encontró en la ruta esperada: {MODEL_PATH}. Asegúrese de que esté en la carpeta /models/ del repositorio. Detalle: {e}")
+    st.stop()
 except Exception as e:
-    # Si el archivo .task no se encuentra en el repo, la app se detiene aquí.
-    st.error(f"Error Crítico: No se pudo inicializar MediaPipe Tasks API. Asegúrese de que el archivo del modelo '{MODEL_FILENAME}' esté en el repositorio en la carpeta /models/. Detalle: {e}")
+    # Si es otro error (ej. permisos, modelo corrupto)
+    st.error(f"Error Crítico: No se pudo inicializar MediaPipe Tasks API. Detalle: {e}")
     st.stop()
 
 # --- Estilos de Dibujo ---
@@ -310,26 +313,26 @@ def process_uploaded_image(uploaded_file_bytes, pose_index):
         if img_bgr is None: return None, "Error: No se pudo decodificar la imagen.", {}
         img_h, img_w, _ = img_bgr.shape
 
-        # 2. Convertir imagen a formato MP (solo RGB) y ejecutar detección (Tasks API)
+        # 2. Detección de Pose con Tasks API
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
 
-        # 💡 CRÍTICO: Envuelve la imagen en un objeto mp.Image
+        # CRÍTICO 1: Convertir imagen a formato mp.Image para la nueva API
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
 
-        # 💡 CRÍTICO: Ejecutar la detección con el método .detect()
+        # CRÍTICO 2: Ejecutar la detección con el método .detect()
         detection_result = pose_detector.detect(mp_image)
 
         # 3. Preparar Imagen para Dibujar (copia BGR)
         img_to_draw = img_bgr.copy()
 
         # 4. Procesar y Dibujar Landmarks
-        # La nueva API devuelve una lista de pose_landmarks (generalmente un solo elemento)
-        if detection_result.pose_landmarks:
+        if detection_result.pose_landmarks and detection_result.pose_landmarks[0]:
 
-            # Solo consideramos la primera pose (si num_poses=1)
+            # El objeto pose_landmarks de Tasks API es una lista de listas de landmarks.
+            # Tomamos la primera pose detectada:
             pose_landmarks_list = detection_result.pose_landmarks[0]
 
-            # 4.1 Dibujar Esqueleto Básico (Usando el objeto de la nueva API en la función de dibujo Legacy)
+            # 4.1 Dibujar Esqueleto Básico (Usando la API Legacy de Dibujo con el objeto de la nueva API)
             mp_drawing.draw_landmarks(
                 img_to_draw,
                 pose_landmarks_list, # Objeto de la nueva API: lista de NormalizedLandmarks
@@ -363,16 +366,13 @@ def process_uploaded_image(uploaded_file_bytes, pose_index):
                                       (coords["LEFT_ANKLE"][1] + coords["RIGHT_ANKLE"][1]) / 2 )
             else: coords["MID_ANKLE"] = None
 
-            # Detección automática de lado (simplificada sin visibilidad)
+            # Detección automática de lado (simplificada)
             lado_visible = "RIGHT"
             if coords.get("LEFT_SHOULDER") and not coords.get("RIGHT_SHOULDER"):
                  lado_visible = "LEFT"
 
 
             # 6. Calcular Ángulos Específicos por Pose (Métricas del Informe)
-            # ➡️ Tu lógica de ángulos (calculate_angulo_3p, etc.) sigue siendo válida aquí
-            # porque se basa en el diccionario 'coords' que acabamos de construir.
-
             # --- LÓGICA DE ÁNGULOS ORIGINAL REINSERTADA ---
             if pose_index == 1: # Vista Anterior Estática
                 analysis_angles["angulo_cabeza_h"] = calcular_angulo_linea_horizontal(coords["LEFT_EYE"], coords["RIGHT_EYE"]) # NUEVO
@@ -431,6 +431,7 @@ def process_uploaded_image(uploaded_file_bytes, pose_index):
                 analysis_angles["inclinacion_tronco_v"] = calcular_angulo_linea_vertical(coords["MID_HIP"], coords["MID_SHOULDER"]) # NUEVO
                 analysis_angles["flexion_rodilla_sls_der"] = calcular_angulo_3p(coords["RIGHT_HIP"], coords["RIGHT_KNEE"], coords["RIGHT_ANKLE"])
             # --- FIN LÓGICA DE ÁNGULOS ORIGINAL REINSERTADA ---
+
 
             # 7. Generar Texto de Análisis
             analysis_text = generar_analisis_texto(analysis_angles, pose_index)
