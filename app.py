@@ -43,50 +43,36 @@ POSE_FILES_INFO = {
 
 # --- Configuración MediaPipe ---
 mp_pose = mp.solutions.pose
+mp_drawing = mp.solutions.drawing_utils # <- Asegúrate de mantener esta línea si existe
 
-# The model path is usually predictable inside the installed package
-MODEL_FILE_NAME = "pose_landmark_heavy.tflite"
-MP_SOLUTION_PATH = os.path.dirname(mp_pose.__file__)
+# 1. Define la ruta al archivo TFLITE (Modelo que usa la API Legacy)
+MODEL_FILE_NAME = "pose_landmark_heavy.tflite" # ⬅️ DEBES AGREGAR ESTE ARCHIVO A /models/
 
-# Try common model paths (adjust '2' for model_complexity)
-MODEL_PATH = os.path.join(MP_SOLUTION_PATH, 'modules', 'pose_landmark', MODEL_FILE_NAME)
+# 2. Ruta Absoluta Local
+LOCAL_MODEL_PATH = os.path.join(BASE_DIR, "models", MODEL_FILE_NAME)
 
-# Use st.cache_resource to load the model file's bytes once.
 @st.cache_resource
-def get_pose_model_path():
-    """Returns the absolute path to the heavy pose model file."""
-    # Check expected installation location
-    if os.path.exists(MODEL_PATH):
-        return MODEL_PATH
-    else:
-        # Fallback check (less common, but safe)
-        fallback_path = os.path.join(os.path.dirname(mp.__file__), 'modules', 'pose_landmark', MODEL_FILE_NAME)
-        if os.path.exists(fallback_path):
-            return fallback_path
-
-        # If the model is STILL not found, it means the installation failed to include it.
-        # This is unlikely after successful pip install, but worth reporting.
-        raise FileNotFoundError(f"MediaPipe Pose Model not found at expected location: {MODEL_PATH}")
-
-
-# The actual Pose object MUST be created by passing the model_asset_path argument,
-# which bypasses the automatic download logic.
-mp_pose = mp.solutions.pose
+def get_local_model_path():
+    """Verifica y devuelve la ruta al modelo TFLITE local."""
+    if not os.path.exists(LOCAL_MODEL_PATH):
+        st.error(f"Error: Modelo '{MODEL_FILE_NAME}' no encontrado en: {LOCAL_MODEL_PATH}. ¡Agrégalo a la carpeta /models/!")
+        st.stop()
+    return LOCAL_MODEL_PATH
 
 @st.cache_resource
 def initialize_pose_detector():
-    """Inicializa y cachea el detector de Pose de MediaPipe."""
-    # La variable de entorno MEDIAPIPE_DOWNLOAD_DIR configurada en secrets.toml
-    # manejará la ubicación de la descarga del modelo.
+    """Inicializa y cachea el detector de Pose de MediaPipe usando la ruta local."""
+
+    # 💡 La clave es usar model_asset_path con el modelo local.
     return mp_pose.Pose(
         static_image_mode=True,
         model_complexity=2,
         enable_segmentation=False,
-        min_detection_confidence=0.5
+        min_detection_confidence=0.5,
+        model_asset_path=get_local_model_path() # ⬅️ ESTO SOLUCIONA EL PermissionError EN LA NUBE
     )
 
 pose_detector = initialize_pose_detector()
-mp_drawing = mp.solutions.drawing_utils
 
 # --- Estilos de Dibujo ---
 COLOR_ESQUELETO = (230, 230, 230)
@@ -439,6 +425,35 @@ def process_uploaded_image(uploaded_file_bytes, pose_index):
 
     except Exception as e:
         return None, f"Error durante el procesamiento general: {e}", {}
+
+# AÑADIR esta función en la Sección 4:
+
+def process_and_update_state(uploader_key, pose_index):
+    """Callback para procesar la imagen y actualizar el estado de sesión."""
+    uploaded_file = st.session_state.get(uploader_key)
+    processed_bytes_key = f'processed_bytes_{pose_index}'
+    analysis_text_key = f'analysis_text_{pose_index}'
+    analysis_angles_key = f'analysis_angles_{pose_index}'
+
+    if uploaded_file is not None:
+        # Usamos el file_id para saber si es un archivo nuevo
+        if f'last_uploaded_id_{pose_index}' not in st.session_state or st.session_state[f'last_uploaded_id_{pose_index}'] != uploaded_file.file_id:
+            with st.spinner("Analizando postura..."):
+                image_data = uploaded_file.getvalue()
+                skeleton_bytes, analysis_string, analysis_dict = process_uploaded_image(image_data, pose_index)
+
+                # Guardar resultados
+                st.session_state[processed_bytes_key] = skeleton_bytes
+                st.session_state[analysis_text_key] = analysis_string
+                st.session_state[analysis_angles_key] = analysis_dict
+                st.session_state[f'last_uploaded_id_{pose_index}'] = uploaded_file.file_id
+
+                # Guardar datos para LSI
+                if pose_index == 7: st.session_state['profundidad_sls_izq'] = analysis_dict.get('flexion_rodilla_sls_izq')
+                elif pose_index == 8: st.session_state['profundidad_sls_der'] = analysis_dict.get('flexion_rodilla_sls_der')
+
+                if skeleton_bytes is None:
+                    st.error("Error al procesar la imagen o pose no detectada.")
 
 # --- Función auxiliar para obtener explicaciones ---
 def get_explanation_for_pose(pose_index):
@@ -901,7 +916,11 @@ def render_pose_detail_view():
         # Uploader (Renderizado Abajo de todo)
         # Note: Ya lo definimos al principio, aquí solo lo renderizamos en su lugar final.
         st.file_uploader("Cargar imagen para analizar:", type=["jpg", "jpeg", "png"],
-                         key=uploader_key, label_visibility="collapsed")
+                         key=uploader_key,
+                         # ✅ Usar el callback
+                         on_change=process_and_update_state,
+                         args=(uploader_key, pose_index), # Argumentos para el callback
+                         label_visibility="collapsed")
 
 # -----------------------------------------------------------------------------
 # 6. LÓGICA PRINCIPAL DE LA APLICACIÓN (MAIN)
