@@ -889,14 +889,14 @@ def render_pose_detail_view():
         else:
             st.info("La imagen procesada aparecerá aquí.")
 
-        # Uploader (Renderizado Abajo de todo)
-        # Note: Ya lo definimos al principio, aquí solo lo renderizamos en su lugar final.
-        st.file_uploader("Cargar imagen para analizar:", type=["jpg", "jpeg", "png"],
-                         key=uploader_key,
-                         # ✅ Usa el callback que definimos en la Sección 4
-                         on_change=process_and_update_state,
-                         args=(uploader_key, pose_index),
-                         label_visibility="collapsed")
+        # # Uploader (Renderizado Abajo de todo)
+        # # Note: Ya lo definimos al principio, aquí solo lo renderizamos en su lugar final.
+        # st.file_uploader("Cargar imagen para analizar:", type=["jpg", "jpeg", "png"],
+        #                  key=uploader_key,
+        #                  # ✅ Usa el callback que definimos en la Sección 4
+        #                  on_change=process_and_update_state,
+        #                  args=(uploader_key, pose_index),
+        #                  label_visibility="collapsed")
 
 # -----------------------------------------------------------------------------
 # 6. LÓGICA PRINCIPAL DE LA APLICACIÓN (MAIN)
