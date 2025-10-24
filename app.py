@@ -11,8 +11,8 @@ import mediapipe as mp # Para pose estimation
 import numpy as np
 import math # Para cálculos trigonométricos si son necesarios
 # --- Configuración MediaPipe (Tasks API - API Robusta para Cloud) ---
-import mediapipe.tasks.python as tasks
-import mediapipe.tasks.python.vision as vision
+from mediapipe.tasks import python as tasks
+from mediapipe.tasks.python import vision
 
 # -----------------------------------------------------------------------------
 # 2. CONFIGURACIÓN DE LA PÁGINA Y CONSTANTES
