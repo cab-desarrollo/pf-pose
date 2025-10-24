@@ -10,6 +10,9 @@ import cv2 # OpenCV para procesamiento y dibujo
 import mediapipe as mp # Para pose estimation
 import numpy as np
 import math # Para cálculos trigonométricos si son necesarios
+# --- Configuración MediaPipe (Tasks API - API Robusta para Cloud) ---
+import mediapipe.tasks.python as tasks
+import mediapipe.tasks.python.vision as vision
 
 # -----------------------------------------------------------------------------
 # 2. CONFIGURACIÓN DE LA PÁGINA Y CONSTANTES
@@ -42,9 +45,6 @@ POSE_FILES_INFO = {
 }
 
 # --- Configuración MediaPipe ---
-# --- Configuración MediaPipe (Tasks API - API Robusta para Cloud) ---
-import mediapipe.tasks.python as tasks
-import mediapipe.tasks.python.vision as vision
 
 # Mantenemos mp_pose y mp_drawing para la lógica de dibujo (API Legacy)
 mp_pose = mp.solutions.pose
@@ -294,68 +294,70 @@ def process_uploaded_image(uploaded_file_bytes, pose_index):
     """
     Procesa imagen, calcula métricas avanzadas del informe y
     devuelve bytes de imagen, texto de análisis y un dict con los ángulos.
-    (Esta función no requiere cambios, la lógica de cálculo es la misma)
     """
     analysis_angles = {}
     skeleton_image_bytes = None
     analysis_text = f"Análisis para Pose {pose_index}\n(Procesamiento no completado)"
 
     try:
-        # 1. Decodificar y Preparar Imagen
+        # 1. Decodificar y Preparar Imagen (OpenCV)
         file_bytes = np.asarray(bytearray(uploaded_file_bytes), dtype=np.uint8)
         img_bgr = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
         if img_bgr is None: return None, "Error: No se pudo decodificar la imagen.", {}
-        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-        img_h, img_w, _ = img_rgb.shape
-        img_rgb.flags.writeable = False
+        img_h, img_w, _ = img_bgr.shape
 
-        # 2. Detectar Pose
-        results = pose_detector.process(img_rgb)
+        # 2. Convertir imagen a formato MP (solo RGB) y ejecutar detección (Tasks API)
+        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
+
+        # Ejecutar la detección con el nuevo objeto PoseLandmarker
+        detection_result = pose_detector.detect(mp_image)
 
         # 3. Preparar Imagen para Dibujar (copia BGR)
         img_to_draw = img_bgr.copy()
 
-        if results.pose_landmarks:
-            landmarks = results.pose_landmarks.landmark
-            lm_idx = mp_pose.PoseLandmark
+        # 4. Procesar y Dibujar Landmarks
+        if detection_result.pose_landmarks:
+            # Solo consideramos la primera pose (si num_poses=1)
+            pose_landmarks = detection_result.pose_landmarks[0]
 
-            # 4. Dibujar Esqueleto Básico
+            # 4.1 Dibujar Esqueleto Básico (usando la API Legacy de Dibujo)
             mp_drawing.draw_landmarks(
                 img_to_draw,
-                results.pose_landmarks,
+                pose_landmarks, # Objeto de la nueva API
                 mp_pose.POSE_CONNECTIONS,
                 landmark_drawing_spec=mp_drawing.DrawingSpec(color=COLOR_PUNTO, thickness=-1, circle_radius=RADIO_PUNTO),
                 connection_drawing_spec=mp_drawing.DrawingSpec(color=COLOR_ESQUELETO, thickness=GROSOR_LINEA)
             )
 
-            # 5. Obtener Coordenadas
-            coords = {lm_name: obtener_coords(landmarks, lm_enum, img_w, img_h)
-                      for lm_name, lm_enum in lm_idx.__members__.items()}
+            # 4.2 Obtener Coordenadas
+            # Adaptamos el formato de Tasks API (NormalizedLandmark) al diccionario de coordenadas (x, y) que necesita
+            coords = {}
+            for i, landmark in enumerate(pose_landmarks):
+                # Usamos la enumeración de PoseLandmark para obtener el nombre del punto
+                lm_name = mp_pose.PoseLandmark(i).name
+                coords[lm_name] = (int(landmark.x * img_w), int(landmark.y * img_h))
 
             # Calcular puntos virtuales (C7 y Centro Pélvico)
-            if coords["LEFT_SHOULDER"] and coords["RIGHT_SHOULDER"]:
+            if coords.get("LEFT_SHOULDER") and coords.get("RIGHT_SHOULDER"):
                 coords["MID_SHOULDER"] = ( (coords["LEFT_SHOULDER"][0] + coords["RIGHT_SHOULDER"][0]) / 2,
                                            (coords["LEFT_SHOULDER"][1] + coords["RIGHT_SHOULDER"][1]) / 2 )
             else: coords["MID_SHOULDER"] = None
 
-            if coords["LEFT_HIP"] and coords["RIGHT_HIP"]:
+            if coords.get("LEFT_HIP") and coords.get("RIGHT_HIP"):
                 coords["MID_HIP"] = ( (coords["LEFT_HIP"][0] + coords["RIGHT_HIP"][0]) / 2,
                                       (coords["LEFT_HIP"][1] + coords["RIGHT_HIP"][1]) / 2 )
             else: coords["MID_HIP"] = None
 
-            if coords["LEFT_ANKLE"] and coords["RIGHT_ANKLE"]:
+            if coords.get("LEFT_ANKLE") and coords.get("RIGHT_ANKLE"):
                 coords["MID_ANKLE"] = ( (coords["LEFT_ANKLE"][0] + coords["RIGHT_ANKLE"][0]) / 2,
                                       (coords["LEFT_ANKLE"][1] + coords["RIGHT_ANKLE"][1]) / 2 )
             else: coords["MID_ANKLE"] = None
 
-            # Detección automática de lado para vistas sagitales
+            # Detección automática de lado (simplificada sin visibilidad)
             lado_visible = "RIGHT"
-            if coords["LEFT_SHOULDER"] and coords["RIGHT_SHOULDER"]:
-                if landmarks[lm_idx.LEFT_SHOULDER.value].visibility > landmarks[lm_idx.RIGHT_SHOULDER.value].visibility:
-                    lado_visible = "LEFT"
-            elif coords["LEFT_SHOULDER"]:
+            if coords.get("LEFT_SHOULDER") and not coords.get("RIGHT_SHOULDER"):
                  lado_visible = "LEFT"
-
 
             # 6. Calcular Ángulos Específicos por Pose (Métricas del Informe)
 
@@ -368,7 +370,7 @@ def process_uploaded_image(uploaded_file_bytes, pose_index):
 
             elif pose_index == 2: # Vista Sagital Estática
                 l_ear, l_shoulder, l_hip, l_knee, l_ankle = f"{lado_visible}_EAR", f"{lado_visible}_SHOULDER", f"{lado_visible}_HIP", f"{lado_visible}_KNEE", f"{lado_visible}_ANKLE"
-                if coords["MID_SHOULDER"] and coords[l_ear]:
+                if coords.get("MID_SHOULDER") and coords.get(l_ear):
                     punto_horizontal = (coords["MID_SHOULDER"][0] + 100, coords["MID_SHOULDER"][1])
                     analysis_angles["angulo_CVA"] = calcular_angulo_3p(punto_horizontal, coords["MID_SHOULDER"], coords[l_ear]) # NUEVO
 
@@ -386,7 +388,7 @@ def process_uploaded_image(uploaded_file_bytes, pose_index):
                 analysis_angles["angulo_pelvis_h"] = calcular_angulo_linea_horizontal(coords["LEFT_HIP"], coords["RIGHT_HIP"])
                 analysis_angles["angulo_FPPA_dinamico_der"] = calcular_angulo_3p(coords["RIGHT_HIP"], coords["RIGHT_KNEE"], coords["RIGHT_ANKLE"])
                 analysis_angles["angulo_FPPA_dinamico_izq"] = calcular_angulo_3p(coords["LEFT_HIP"], coords["LEFT_KNEE"], coords["LEFT_ANKLE"])
-                if coords["MID_HIP"] and coords["MID_ANKLE"]:
+                if coords.get("MID_HIP") and coords.get("MID_ANKLE"):
                     analysis_angles["desplazamiento_pelvico_px"] = coords["MID_HIP"][0] - coords["MID_ANKLE"][0]
 
             elif pose_index == 5: # OHS Sagital
@@ -415,6 +417,7 @@ def process_uploaded_image(uploaded_file_bytes, pose_index):
                 analysis_angles["angulo_FPPA_sls_der"] = calcular_angulo_3p(coords["RIGHT_HIP"], coords["RIGHT_KNEE"], coords["RIGHT_ANKLE"])
                 analysis_angles["inclinacion_tronco_v"] = calcular_angulo_linea_vertical(coords["MID_HIP"], coords["MID_SHOULDER"]) # NUEVO
                 analysis_angles["flexion_rodilla_sls_der"] = calcular_angulo_3p(coords["RIGHT_HIP"], coords["RIGHT_KNEE"], coords["RIGHT_ANKLE"])
+            # --- FIN LÓGICA DE ÁNGULOS ORIGINAL REINSERTADA ---
 
             # 7. Generar Texto de Análisis
             analysis_text = generar_analisis_texto(analysis_angles, pose_index)
