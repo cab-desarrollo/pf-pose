@@ -9,7 +9,6 @@ import io
 import cv2 # OpenCV para procesamiento y dibujo
 import mediapipe as mp # Para pose estimation
 import numpy as np
-import math # Para cálculos trigonométricos si son necesarios
 
 # -----------------------------------------------------------------------------
 # 2. CONFIGURACIÓN DE LA PÁGINA Y CONSTANTES
@@ -42,33 +41,26 @@ POSE_FILES_INFO = {
 }
 
 # --- Configuración MediaPipe ---
-mp_pose = mp.solutions.pose
-mp_drawing = mp.solutions.drawing_utils
-
-# 1. Define la ruta al archivo TFLITE (Modelo que usa la API Legacy)
-# MODEL_FILE_NAME = "pose_landmark_heavy.tflite" # ⬅️ ESTA LÍNEA ES INNECESARIA
-# 2. Ruta Absoluta Local
-# LOCAL_MODEL_PATH = os.path.join(BASE_DIR, "models", MODEL_FILE_NAME) # ⬅️ ESTA LÍNEA ES INNECESARIA
-
-# @st.cache_resource
-# def get_local_model_path(): # ⬅️ ESTA FUNCIÓN ES INNECESARIA
-#     """Verifica y devuelve la ruta al modelo TFLITE local."""
-#     if not os.path.exists(LOCAL_MODEL_PATH):
-#         st.error(f"Error: Modelo '{MODEL_FILE_NAME}' no encontrado en: {LOCAL_MODEL_PATH}. ¡Agrégalo a la carpeta /models/!")
-#         st.stop()
-#     return LOCAL_MODEL_PATH
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
 
 @st.cache_resource
 def initialize_pose_detector():
-    """Inicializa y cachea el detector de Pose de MediaPipe."""
-    # Usamos model_complexity=2 para el modelo "heavy" por defecto de MediaPipe.
-    return mp_pose.Pose(
-        static_image_mode=True,
-        model_complexity=2, # Usa el modelo "Heavy" interno (pose_landmark_heavy)
-        enable_segmentation=False,
-        min_detection_confidence=0.5,
-        # model_asset_path=get_local_model_path() # ⬅️ ELIMINAR ESTA LÍNEA
-    )
+    """Inicializa y cachea el detector de Pose de MediaPipe usando el modelo local."""
+    model_path = os.path.join(BASE_DIR, "models", "pose_landmarker_full.task")
+
+    if not os.path.exists(model_path):
+        st.error(f"No se encontró el modelo en {model_path}. Verificá que esté incluido en el repo.")
+        st.stop()
+
+    # Configurar las opciones del modelo
+    base_options = python.BaseOptions(model_asset_path=model_path)
+    options = vision.PoseLandmarkerOptions(base_options=base_options)
+
+    # Crear el detector
+    detector = vision.PoseLandmarker.create_from_options(options)
+    return detector
+
 pose_detector = initialize_pose_detector()
 
 # --- Estilos de Dibujo ---
