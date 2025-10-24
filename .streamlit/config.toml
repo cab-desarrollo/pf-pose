@@ -6,4 +6,4 @@ magicEnabled = true
 [server]
 # Fijar la versión de Python a 3.11 para que MediaPipe pueda instalarse
 # (3.13.9 no es compatible con los binarios de MediaPipe)
-pythonVersion = 3.11
+pythonVersion = 3.10
