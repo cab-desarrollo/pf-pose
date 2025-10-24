@@ -58,11 +58,15 @@ MODEL_PATH = os.path.join(BASE_DIR, "models", MODEL_FILENAME)
 
 @st.cache_resource
 def initialize_pose_landmarker(model_path: str):
-    """Carga y cachea el detector de pose usando la ruta del activo local (.task)."""
+    """Carga y cachea el detector de pose usando la ruta del activo local (.task) y fuerza el uso de CPU."""
 
-    # Configurar BaseOptions con la ruta local para Carga Explícita
-    # NOTA: Esto evita la descarga automática que causó el PermissionError
-    base_options = tasks.BaseOptions(model_asset_path=model_path)
+    # 1. Configurar la delegación a CPU explícitamente
+    # Importante: BaseOptions se debe importar desde el módulo tasks (asumimos la corrección anterior).
+    base_options = tasks.BaseOptions(
+        model_asset_path=model_path,
+        # 🚨 Nuevo: Forzar el uso del delegado de CPU
+        delegate=tasks.BaseOptions.Delegate.CPU
+    )
 
     # Configurar opciones del detector para modo IMAGE
     options = vision.PoseLandmarkerOptions(
