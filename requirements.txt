@@ -2,5 +2,5 @@ streamlit
 pandas
 Pillow
 mediapipe==0.10.11        # Compatible con Python 3.10 y la nueva API
-opencv-python-headless==4.8.1.78 # Esencial: Evita dependencias de GUI en el servidor
+opencv-python-headless
 numpy
