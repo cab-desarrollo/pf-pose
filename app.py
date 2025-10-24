@@ -43,12 +43,18 @@ POSE_FILES_INFO = {
 
 # --- Configuración MediaPipe ---
 mp_pose = mp.solutions.pose
-pose_detector = mp_pose.Pose(
-    static_image_mode=True,
-    model_complexity=2,
-    enable_segmentation=False,
-    min_detection_confidence=0.5
-)
+
+@st.cache_resource
+def initialize_pose_detector():
+    """Initializes the MediaPipe Pose detector and caches it."""
+    return mp_pose.Pose(
+        static_image_mode=True,
+        model_complexity=2,
+        enable_segmentation=False,
+        min_detection_confidence=0.5
+    )
+
+pose_detector = initialize_pose_detector()
 mp_drawing = mp.solutions.drawing_utils
 
 # --- Estilos de Dibujo ---
