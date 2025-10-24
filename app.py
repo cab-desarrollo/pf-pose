@@ -74,8 +74,7 @@ def get_pose_model_path():
 @st.cache_resource
 def initialize_pose_detector():
     """Inicializa y cachea el detector de Pose de MediaPipe."""
-    # El uso de la variable de entorno MEDIALIBS_DOWNLOAD_AUTO_CHECK = "false"
-    # previene el PermissionError, forzando al constructor a usar los archivos locales.
+    # Al estar MEDIAPIPE_ENABLE_DOWNLOADS="false", este constructor funcionará.
     return mp_pose.Pose(
         static_image_mode=True,
         model_complexity=2,
