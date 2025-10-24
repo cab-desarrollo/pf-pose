@@ -746,14 +746,20 @@ def render_pose_detail_view():
     analysis_text_key = f'analysis_text_{pose_index}'
     analysis_angles_key = f'analysis_angles_{pose_index}'
     analysis_msg_key = f'analysis_msg_{pose_index}'
-    uploader_key = f"uploader_{pose_index}" # Clave del uploader
+    # Definimos la clave correctamente, como se usaba en el resto del código
+    uploader_key = f"uploader_{pose_index}"
 
-    # --- LÓGICA CRÍTICA: Procesamiento del archivo ---
-    # Recuperar el valor del uploader después de la ejecución del ciclo anterior
-    # Importante: Streamlit lee el valor del uploader antes de que se renderice completamente en el ciclo.
-
-    # Intentar obtener el archivo subido del estado (si ya existe)
-    uploaded_file = st.session_state.get(uploader_key)
+    st.file_uploader("Cargar imagen para analizar:",
+        type=["jpg", "jpeg", "png"],
+        # 1. Usar la clave correcta (e.g., "uploader_7")
+        key=uploader_key,
+        # 2. Usar el callback que definimos en la Sección 4
+        on_change=process_and_update_state,
+        # 3. Pasar SOLAMENTE el nombre de la clave (string) y el índice.
+        # La función process_and_update_state se encarga de usar 'uploader_key' para buscar el archivo.
+        args=(uploader_key, pose_index),
+        label_visibility="collapsed"
+    )
 
 
     # --- FIN DE LA LÓGICA CRÍTICA ---
