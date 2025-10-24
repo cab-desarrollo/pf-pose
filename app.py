@@ -71,10 +71,11 @@ def get_pose_model_path():
 
 # The actual Pose object MUST be created by passing the model_asset_path argument,
 # which bypasses the automatic download logic.
+mp_pose = mp.solutions.pose
 @st.cache_resource
 def initialize_pose_detector():
     """Inicializa y cachea el detector de Pose de MediaPipe."""
-    # Las variables de entorno en secrets.toml fuerzan a esta línea a trabajar.
+    # La variable de entorno detiene la descarga.
     return mp_pose.Pose(
         static_image_mode=True,
         model_complexity=2,
