@@ -44,14 +44,46 @@ POSE_FILES_INFO = {
 # --- Configuración MediaPipe ---
 mp_pose = mp.solutions.pose
 
+# The model path is usually predictable inside the installed package
+MODEL_FILE_NAME = "pose_landmark_heavy.tflite"
+MP_SOLUTION_PATH = os.path.dirname(mp_pose.__file__)
+
+# Try common model paths (adjust '2' for model_complexity)
+MODEL_PATH = os.path.join(MP_SOLUTION_PATH, 'modules', 'pose_landmark', MODEL_FILE_NAME)
+
+# Use st.cache_resource to load the model file's bytes once.
+@st.cache_resource
+def get_pose_model_path():
+    """Returns the absolute path to the heavy pose model file."""
+    # Check if the model file exists at the expected installation location
+    if os.path.exists(MODEL_PATH):
+        return MODEL_PATH
+    else:
+        # If the model is not shipped or moved, you would typically download it
+        # to a writable Streamlit cache location, but MediaPipe makes this hard.
+        # Given the error, we MUST rely on the file existing after installation.
+        # As a last resort, check another common path if MP_SOLUTION_PATH logic changes:
+        fallback_path = os.path.join(os.path.dirname(mp.__file__), 'modules', 'pose_landmark', MODEL_FILE_NAME)
+        if os.path.exists(fallback_path):
+            return fallback_path
+
+        raise FileNotFoundError(f"MediaPipe Pose Model not found at expected location: {MODEL_PATH}")
+
+
+# The actual Pose object MUST be created by passing the model_asset_path argument,
+# which bypasses the automatic download logic.
 @st.cache_resource
 def initialize_pose_detector():
     """Initializes the MediaPipe Pose detector and caches it."""
+    model_asset_path = get_pose_model_path()
+
     return mp_pose.Pose(
         static_image_mode=True,
         model_complexity=2,
         enable_segmentation=False,
-        min_detection_confidence=0.5
+        min_detection_confidence=0.5,
+        # **Critical change to bypass download: pass the model path directly**
+        model_asset_path=model_asset_path
     )
 
 pose_detector = initialize_pose_detector()
