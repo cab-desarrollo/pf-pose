@@ -47,12 +47,6 @@ El objetivo es proporcionar una herramienta **rápida, accesible y visual** para
 
 ---
 
-## 📁 Estructura del Proyecto
-
-. ├── app.py # Script principal de la aplicación Streamlit ├── assets # Carpeta para recursos estáticos │ ├── logo │ │ └── cab-logo.png # Logo de la CAB │ └── pose_img # Imágenes de referencia para el menú │ ├── 1_static_front_view.png │ ├── 2_static_lateral_view.png │ ├── ... (hasta 8_sls_right_view.png) ├── requirements.txt # Dependencias de Python └── users.csv # Archivo simple para credenciales de login (Usuario, Contraseña)
-
----
-
 ## 🚀 Instalación y Ejecución
 
 1. **Clonar el Repositorio:**
