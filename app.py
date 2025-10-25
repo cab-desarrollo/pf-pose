@@ -10,6 +10,10 @@ import cv2 # OpenCV para procesamiento y dibujo
 import mediapipe as mp # Para pose estimation
 import numpy as np
 
+mp_pose = mp.solutions.pose
+mp_drawing = mp.solutions.drawing_utils
+mp_drawing_styles = mp.solutions.drawing_styles
+
 # -----------------------------------------------------------------------------
 # 2. CONFIGURACIÓN DE LA PÁGINA Y CONSTANTES
 # -----------------------------------------------------------------------------
@@ -53,9 +57,11 @@ def initialize_pose_detector():
         st.error(f"No se encontró el modelo en {model_path}. Verificá que esté incluido en el repo.")
         st.stop()
 
-    # Configurar las opciones del modelo
     base_options = python.BaseOptions(model_asset_path=model_path)
-    options = vision.PoseLandmarkerOptions(base_options=base_options)
+    options = vision.PoseLandmarkerOptions(
+        base_options=base_options,
+        running_mode=vision.RunningMode.IMAGE
+    )
 
     # Crear el detector
     detector = vision.PoseLandmarker.create_from_options(options)
@@ -137,7 +143,6 @@ st.markdown("""
 # -----------------------------------------------------------------------------
 @st.cache_data(ttl=3600)
 def get_users(csv_path):
-    # (Misma función que antes)
     if not os.path.exists(csv_path): st.error(f"Error Crítico: No se encontró '{os.path.basename(csv_path)}'."); return None
     try:
         users_df = pd.read_csv(csv_path)
@@ -148,7 +153,6 @@ def get_users(csv_path):
     except Exception as e: st.error(f"Error Crítico al leer 'users.csv': {e}"); return None
 
 def check_login(username, password, users_df):
-    # (Misma función que antes)
     if users_df is None: return False
     if username is None or password is None: return False
     user_record = users_df[users_df['username'] == str(username)]
@@ -274,7 +278,6 @@ def process_uploaded_image(uploaded_file_bytes, pose_index):
     """
     Procesa imagen, calcula métricas avanzadas del informe y
     devuelve bytes de imagen, texto de análisis y un dict con los ángulos.
-    (Esta función no requiere cambios, la lógica de cálculo es la misma)
     """
     analysis_angles = {}
     skeleton_image_bytes = None
@@ -287,22 +290,34 @@ def process_uploaded_image(uploaded_file_bytes, pose_index):
         if img_bgr is None: return None, "Error: No se pudo decodificar la imagen.", {}
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
         img_h, img_w, _ = img_rgb.shape
-        img_rgb.flags.writeable = False
 
-        # 2. Detectar Pose
-        results = pose_detector.process(img_rgb)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
+
+        detection_result = pose_detector.detect(mp_image)
 
         # 3. Preparar Imagen para Dibujar (copia BGR)
         img_to_draw = img_bgr.copy()
 
-        if results.pose_landmarks:
-            landmarks = results.pose_landmarks.landmark
+        if detection_result.pose_landmarks:
+            pose_landmarks_list = detection_result.pose_landmarks[0]
+            landmarks = pose_landmarks_list
             lm_idx = mp_pose.PoseLandmark
 
-            # 4. Dibujar Esqueleto Básico
+            from mediapipe.framework.formats import landmark_pb2
+            pose_landmarks_proto = landmark_pb2.NormalizedLandmarkList()
+            pose_landmarks_proto.landmark.extend([
+                landmark_pb2.NormalizedLandmark(
+                    x=landmark.x,
+                    y=landmark.y,
+                    z=landmark.z,
+                    visibility=landmark.visibility
+                ) for landmark in landmarks
+            ])
+
+            # Dibujar Esqueleto Básico
             mp_drawing.draw_landmarks(
                 img_to_draw,
-                results.pose_landmarks,
+                pose_landmarks_proto,
                 mp_pose.POSE_CONNECTIONS,
                 landmark_drawing_spec=mp_drawing.DrawingSpec(color=COLOR_PUNTO, thickness=-1, circle_radius=RADIO_PUNTO),
                 connection_drawing_spec=mp_drawing.DrawingSpec(color=COLOR_ESQUELETO, thickness=GROSOR_LINEA)
@@ -340,7 +355,7 @@ def process_uploaded_image(uploaded_file_bytes, pose_index):
             # 6. Calcular Ángulos Específicos por Pose (Métricas del Informe)
 
             if pose_index == 1: # Vista Anterior Estática
-                analysis_angles["angulo_cabeza_h"] = calcular_angulo_linea_horizontal(coords["LEFT_EYE"], coords["RIGHT_EYE"]) # NUEVO
+                analysis_angles["angulo_cabeza_h"] = calcular_angulo_linea_horizontal(coords["LEFT_EYE"], coords["RIGHT_EYE"])
                 analysis_angles["angulo_hombros_h"] = calcular_angulo_linea_horizontal(coords["LEFT_SHOULDER"], coords["RIGHT_SHOULDER"])
                 analysis_angles["angulo_pelvis_h"] = calcular_angulo_linea_horizontal(coords["LEFT_HIP"], coords["RIGHT_HIP"])
                 analysis_angles["angulo_FPPA_estatico_der"] = calcular_angulo_3p(coords["RIGHT_HIP"], coords["RIGHT_KNEE"], coords["RIGHT_ANKLE"])
@@ -350,9 +365,9 @@ def process_uploaded_image(uploaded_file_bytes, pose_index):
                 l_ear, l_shoulder, l_hip, l_knee, l_ankle = f"{lado_visible}_EAR", f"{lado_visible}_SHOULDER", f"{lado_visible}_HIP", f"{lado_visible}_KNEE", f"{lado_visible}_ANKLE"
                 if coords["MID_SHOULDER"] and coords[l_ear]:
                     punto_horizontal = (coords["MID_SHOULDER"][0] + 100, coords["MID_SHOULDER"][1])
-                    analysis_angles["angulo_CVA"] = calcular_angulo_3p(punto_horizontal, coords["MID_SHOULDER"], coords[l_ear]) # NUEVO
+                    analysis_angles["angulo_CVA"] = calcular_angulo_3p(punto_horizontal, coords["MID_SHOULDER"], coords[l_ear])
 
-                analysis_angles["inclinacion_corporal_v"] = calcular_angulo_linea_vertical(coords[l_ankle], coords[l_shoulder]) # NUEVO
+                analysis_angles["inclinacion_corporal_v"] = calcular_angulo_linea_vertical(coords[l_ankle], coords[l_shoulder])
                 analysis_angles["inclinacion_pelvica_v"] = calcular_angulo_linea_vertical(coords[l_hip], coords[l_shoulder])
                 analysis_angles["extension_rodilla"] = calcular_angulo_3p(coords[l_hip], coords[l_knee], coords[l_ankle])
 
@@ -372,9 +387,9 @@ def process_uploaded_image(uploaded_file_bytes, pose_index):
             elif pose_index == 5: # OHS Sagital
                 l_shoulder, l_hip, l_knee, l_ankle, l_foot = f"{lado_visible}_SHOULDER", f"{lado_visible}_HIP", f"{lado_visible}_KNEE", f"{lado_visible}_ANKLE", f"{lado_visible}_FOOT_INDEX"
                 analysis_angles["inclinacion_tronco_v"] = calcular_angulo_linea_vertical(coords[l_hip], coords[l_shoulder])
-                analysis_angles["inclinacion_tibia_v"] = calcular_angulo_linea_vertical(coords[l_ankle], coords[l_knee]) # NUEVO
+                analysis_angles["inclinacion_tibia_v"] = calcular_angulo_linea_vertical(coords[l_ankle], coords[l_knee])
                 if analysis_angles.get("inclinacion_tronco_v") is not None and analysis_angles.get("inclinacion_tibia_v") is not None:
-                    analysis_angles["paralelismo_tronco_tibia"] = analysis_angles["inclinacion_tronco_v"] - analysis_angles["inclinacion_tibia_v"] # NUEVO
+                    analysis_angles["paralelismo_tronco_tibia"] = analysis_angles["inclinacion_tronco_v"] - analysis_angles["inclinacion_tibia_v"]
 
                 analysis_angles["flexion_cadera"] = calcular_angulo_3p(coords[l_shoulder], coords[l_hip], coords[l_knee])
                 analysis_angles["flexion_rodilla"] = calcular_angulo_3p(coords[l_hip], coords[l_knee], coords[l_ankle])
@@ -387,13 +402,13 @@ def process_uploaded_image(uploaded_file_bytes, pose_index):
             elif pose_index == 7: # SLS Izquierda
                 analysis_angles["angulo_CPD"] = calcular_angulo_linea_horizontal(coords["LEFT_HIP"], coords["RIGHT_HIP"])
                 analysis_angles["angulo_FPPA_sls_izq"] = calcular_angulo_3p(coords["LEFT_HIP"], coords["LEFT_KNEE"], coords["LEFT_ANKLE"])
-                analysis_angles["inclinacion_tronco_v"] = calcular_angulo_linea_vertical(coords["MID_HIP"], coords["MID_SHOULDER"]) # NUEVO
+                analysis_angles["inclinacion_tronco_v"] = calcular_angulo_linea_vertical(coords["MID_HIP"], coords["MID_SHOULDER"])
                 analysis_angles["flexion_rodilla_sls_izq"] = calcular_angulo_3p(coords["LEFT_HIP"], coords["LEFT_KNEE"], coords["LEFT_ANKLE"])
 
             elif pose_index == 8: # SLS Derecha
                 analysis_angles["angulo_CPD"] = calcular_angulo_linea_horizontal(coords["LEFT_HIP"], coords["RIGHT_HIP"])
                 analysis_angles["angulo_FPPA_sls_der"] = calcular_angulo_3p(coords["RIGHT_HIP"], coords["RIGHT_KNEE"], coords["RIGHT_ANKLE"])
-                analysis_angles["inclinacion_tronco_v"] = calcular_angulo_linea_vertical(coords["MID_HIP"], coords["MID_SHOULDER"]) # NUEVO
+                analysis_angles["inclinacion_tronco_v"] = calcular_angulo_linea_vertical(coords["MID_HIP"], coords["MID_SHOULDER"])
                 analysis_angles["flexion_rodilla_sls_der"] = calcular_angulo_3p(coords["RIGHT_HIP"], coords["RIGHT_KNEE"], coords["RIGHT_ANKLE"])
 
             # 7. Generar Texto de Análisis
@@ -414,8 +429,6 @@ def process_uploaded_image(uploaded_file_bytes, pose_index):
 
     except Exception as e:
         return None, f"Error durante el procesamiento general: {e}", {}
-
-# AÑADIR esta función en la Sección 4:
 
 def process_and_update_state(uploader_key, pose_index):
     """Callback para procesar la imagen y actualizar el estado de sesión."""
@@ -527,7 +540,7 @@ def get_explanation_for_pose(pose_index):
                 {"nombre": "Valgo Dinámico (Izq)", "clave_resultado": "angulo_FPPA_dinamico_izq", "norma_min": 170.0, "norma_max": 180.0, "interpretacion": "<170° Valgo Izquierdo."}
             ],
             "metricas_secundarias": [
-                 {"nombre": "Shift Pélvico (px)", "clave_resultado": "desplazamiento_pelvico_px", "norma_min": -40.0, "norma_max": 40.0, "interpretacion": "Desplazamiento lateral (px)."} # Aumentado umbral px
+                 {"nombre": "Shift Pélvico (px)", "clave_resultado": "desplazamiento_pelvico_px", "norma_min": -40.0, "norma_max": 40.0, "interpretacion": "Desplazamiento lateral (px)."}
             ]
         },
         5: { # OHS SAGITAL
@@ -586,7 +599,7 @@ def get_explanation_for_pose(pose_index):
                 **Alertas:** Valgo rodilla, caída pélvica, inclinación tronco, inestabilidad tobillo.
             """,
             "metricas_clave": [
-                {"nombre": "Valgo Dinámico (Izq)", "clave_resultado": "angulo_FPPA_sls_izq", "norma_min": 165.0, "norma_max": 180.0, "interpretacion": "Valgo izquierdo >15° (<165°)."}, # Norma más estricta para SLS
+                {"nombre": "Valgo Dinámico (Izq)", "clave_resultado": "angulo_FPPA_sls_izq", "norma_min": 165.0, "norma_max": 180.0, "interpretacion": "Valgo izquierdo >15° (<165°)."},
                 {"nombre": "Caída Pélvica (CPD)", "clave_resultado": "angulo_CPD", "norma_min": -5.0, "norma_max": 5.0, "interpretacion": "Caída contralateral <5°."}
             ],
             "metricas_secundarias": [
@@ -606,7 +619,7 @@ def get_explanation_for_pose(pose_index):
                 **Alertas:** Valgo, caída pélvica, inclinación tronco (mayores que en lado izq). Asimetrías significativas.
             """,
             "metricas_clave": [
-                {"nombre": "Valgo Dinámico (Der)", "clave_resultado": "angulo_FPPA_sls_der", "norma_min": 165.0, "norma_max": 180.0, "interpretacion": "Valgo derecho >15° (<165°)."}, # Norma más estricta para SLS
+                {"nombre": "Valgo Dinámico (Der)", "clave_resultado": "angulo_FPPA_sls_der", "norma_min": 165.0, "norma_max": 180.0, "interpretacion": "Valgo derecho >15° (<165°)."},
                 {"nombre": "Caída Pélvica (CPD)", "clave_resultado": "angulo_CPD", "norma_min": -5.0, "norma_max": 5.0, "interpretacion": "Caída contralateral <5°."}
             ],
             "metricas_secundarias": [
@@ -626,7 +639,6 @@ def get_explanation_for_pose(pose_index):
 
 def render_login_view(users_df):
     """Muestra la vista de Login de forma compacta."""
-    # (Sin cambios)
     _, col_main, _ = st.columns([1, 1, 1])
     with col_main:
         try:
@@ -646,8 +658,6 @@ def render_login_view(users_df):
 
 def render_menu_view():
     """Muestra el Menú Principal con el título como botón."""
-    # (Sin cambios)
-
     # --- Barra Superior ---
     col_main, col_logout = st.columns([0.85, 0.15])
 
@@ -722,9 +732,7 @@ def render_menu_view():
 
 
 def render_pose_detail_view():
-    """
-    CORREGIDO: Lógica de procesamiento reinsertada y aislada para garantizar el flujo.
-    """
+    """Vista de detalle de pose con procesamiento de imagen."""
     if "pose_seleccionada_info" not in st.session_state or st.session_state.pose_seleccionada_info is None:
         st.warning("..."); st.session_state.vista_actual = "menu"; st.rerun(); return
 
@@ -737,25 +745,7 @@ def render_pose_detail_view():
     processed_bytes_key = f'processed_bytes_{pose_index}'
     analysis_text_key = f'analysis_text_{pose_index}'
     analysis_angles_key = f'analysis_angles_{pose_index}'
-    analysis_msg_key = f'analysis_msg_{pose_index}'
-    # Definimos la clave correctamente, como se usaba en el resto del código
     uploader_key = f"uploader_{pose_index}"
-
-    st.file_uploader("Cargar imagen para analizar:",
-        type=["jpg", "jpeg", "png"],
-        # 1. Usar la clave correcta (e.g., "uploader_7")
-        key=uploader_key,
-        # 2. Usar el callback que definimos en la Sección 4
-        on_change=process_and_update_state,
-        # 3. Pasar SOLAMENTE el nombre de la clave (string) y el índice.
-        # La función process_and_update_state se encarga de usar 'uploader_key' para buscar el archivo.
-        args=(uploader_key, pose_index),
-        label_visibility="collapsed"
-    )
-
-
-    # --- FIN DE LA LÓGICA CRÍTICA ---
-
 
     # --- Barra Superior (Renderizado) ---
     col_back, col_title_spacer, col_logout_detail = st.columns([0.1, 0.65, 0.25])
@@ -778,8 +768,6 @@ def render_pose_detail_view():
     st.markdown("""<hr style="margin-top: 0.5rem; margin-bottom: 1rem;" /> """, unsafe_allow_html=True)
 
     # --- FILA SUPERIOR: Contexto (Renderizado) ---
-
-
     col_info_img, col_info_text = st.columns([0.4, 0.6], gap="large")
 
     with col_info_img:
@@ -812,7 +800,6 @@ def render_pose_detail_view():
 
     # Obtener el estado de procesamiento
     image_processed = processed_bytes_key in st.session_state and st.session_state[processed_bytes_key] is not None
-
 
     # --- CUADRANTE 4: Resultados Numéricos (Renderizado) ---
     with col_metrics:
@@ -866,7 +853,6 @@ def render_pose_detail_view():
             else:
                  st.info("El LSI se calculará después de analizar ambas piernas.")
 
-
     # --- CUADRANTE 3: Imagen Procesada y Carga (Renderizado) ---
     with col_result_display:
 
@@ -889,14 +875,12 @@ def render_pose_detail_view():
         else:
             st.info("La imagen procesada aparecerá aquí.")
 
-        # # Uploader (Renderizado Abajo de todo)
-        # # Note: Ya lo definimos al principio, aquí solo lo renderizamos en su lugar final.
-        # st.file_uploader("Cargar imagen para analizar:", type=["jpg", "jpeg", "png"],
-        #                  key=uploader_key,
-        #                  # ✅ Usa el callback que definimos en la Sección 4
-        #                  on_change=process_and_update_state,
-        #                  args=(uploader_key, pose_index),
-        #                  label_visibility="collapsed")
+        # Uploader (Renderizado Abajo de todo)
+        st.file_uploader("Cargar imagen para analizar:", type=["jpg", "jpeg", "png"],
+                         key=uploader_key,
+                         on_change=process_and_update_state,
+                         args=(uploader_key, pose_index),
+                         label_visibility="collapsed")
 
 # -----------------------------------------------------------------------------
 # 6. LÓGICA PRINCIPAL DE LA APLICACIÓN (MAIN)
@@ -933,8 +917,3 @@ def main():
 # -----------------------------------------------------------------------------
 if __name__ == "__main__":
     main()
-
-    # Cerrar detector de pose al finalizar (importante si no es static_image_mode=True)
-    # Si es True, no es estrictamente necesario, pero buena práctica.
-    # Considerar mover pose_detector a st.session_state o usar @st.cache_resource si se usa fuera de process_uploaded_image
-    # pose_detector.close() # Comentado por ahora, ya que se inicializa globalmente
